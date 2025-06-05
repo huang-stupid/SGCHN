@@ -16,7 +16,7 @@ from sklearn import metrics
 from munkres import Munkres, print_matrix
 from model import GCNModelAE, DSC
 from utils import load_data, mask_test_edges, preprocess_graph,load_data_,load_graph,\
-    matrix_norm, setup_seed, GraphConstructsByKmean, setdiv, MatrixTopK
+    matrix_norm, setup_seed, GraphConstructsByKmean, MatrixTopK
 from sklearn.cluster import SpectralClustering
 from matplotlib import cm
 import matplotlib.pyplot as plt
@@ -32,11 +32,13 @@ import sklearn.metrics.pairwise as pair
 parser = argparse.ArgumentParser()
 parser.add_argument('--model', type=str, default='gcn_vae', help="models used")
 parser.add_argument('--seed', type=int, default=70, help='Random seed.')
-parser.add_argument('--epochs', type=int, default=100, help='Number of epochs to train.')
+parser.add_argument('--epochs', type=int, default=21, help='Number of epochs to train.')
+parser.add_argument('--dsc_epoch', type=int, default=251, help='Number of epochs to train.')
 parser.add_argument('--hidden1', type=int, default=256, help='Number of units in hidden layer 1.')#512
 parser.add_argument('--hidden2', type=int, default=16, help='Number of units in hidden layer 2.')#32
-parser.add_argument('--lmd', type=float, default=0.1, help='Dropout rate (1 - keep probability).')
+parser.add_argument('--lmd', type=float, default=0.01, help='Dropout rate (1 - keep probability).')
 parser.add_argument('--lr', type=float, default=1e-03, help='Initial learning rate.')
+parser.add_argument('--dsc_lr', type=float, default=1e-03, help='Initial learning rate.')
 parser.add_argument('--dropout', type=float, default=0.1, help='Dropout rate (1 - keep probability).')
 parser.add_argument('--dataset', type=str, default='cora', help='type of dataset.')
 parser.add_argument('--k', type=int, default=100, help='Number of loop')
@@ -44,18 +46,22 @@ parser.add_argument('--loop', type=int, default=1, help='Number of loop')
 parser.add_argument('--thr', type=float, default=0.1, help='Number of loop')
 parser.add_argument('--weight_s', type=float, default=0., help='Number of loop')
 parser.add_argument('--log', type=str, default='False', help='log or not')
-parser.add_argument('--cluster', type=str, default='kmean', help='log or not')
+parser.add_argument('--n_cluster', type=int, default=7, help='log or not')
 parser.add_argument('--m', type=str, default='gae', help='log or not')
 parser.add_argument('--impute', type=str, default='False', help='log or not')
 parser.add_argument('--pre_model', type=str, default='False', help='log or not')
 parser.add_argument('--sample_rate', type=float, default=0.5, help='log or not')
 parser.add_argument('--gm', type=float, default=1.0, help='log or not')
-parser.add_argument('--test', type=str, help='log or not')
-parser.add_argument('--cf', type=float, default=0.1, help='log or not')
-parser.add_argument('--pw', type=float, default=0.1, help='log or not')
-parser.add_argument('--beta', type=float, default=1.0, help='log or not')
+parser.add_argument('--d', type=int, default=10, help='log or not')
+parser.add_argument('--cf', type=float, default=0.9, help='log or not')
+parser.add_argument('--pw', type=float, default=0.4, help='log or not')
+parser.add_argument('--beta', type=float, default=0.1, help='log or not')
 parser.add_argument('--alpha', type=float, default=1.0, help='log or not')
-parser.add_argument('--gamma', type=float, default=1.0, help='log or not')
+parser.add_argument('--ro', type=float, default=4.0, help='log or not')
+parser.add_argument('--subdim', type=int, default=20, help='log or not')
+parser.add_argument('--ratio', type=float, default=0.1, help='log or not')
+
+
 
 
 args = parser.parse_args()
@@ -145,12 +151,8 @@ import random
 
 def gae_for(args):
     start = time.time()
-    lr = 0.001
-    cfs={'cora':0.9,'citeseer':0.3, 'wiki':0.4,'uat':0.5,'amap':0.9,'acm':0.1,'eat':0.3,'dblp':0.1,'cornell':0.3,'texas':0.9,'wisc':0.5}
-    pws={'cora':0.4,'citeseer':0.05,'wiki':0.1,'uat':0.1,'amap':0.3,'acm':0.1,'eat':0.1,'dblp':0.1,'cornell':0.9,'texas':0.1,'wisc':0.3}#uat=1
-    dsc_lr = {'cora': 0.001, 'citeseer': 0.01, 'dblp': 0.001, 'acm': 0.001, 'wiki': 0.0005, 'amap': 0.0001,
-              'uat': 0.001, 'eat': 0.0001, 'bat': 0.0005, \
-              'cornell': 0.001, 'texas': 0.01, 'wisc': 0.0005}
+    lr = args.lr
+    dsc_lr=args.dsc_lr
     dataset = args.dataset
     adj = None
     adj_label = None
@@ -159,111 +161,46 @@ def gae_for(args):
     n_nodes = None
     feat_dim = None
     adj_norm = None
-    if dataset in {'cora','pubmed'}:
-        print("Using {} dataset".format(args.dataset))
-        adj, features, labels= load_data(args.dataset)
-        if dataset == 'cora':
-            n_cluster = 7
-            lr = 0.001
+    dataset = args.dataset
+    adj, features, labels= load_data(args.dataset)
+    n_cluster = args.n_cluster
 
 
-        elif dataset == 'pubmed':
-            n_cluster = 3
-            lr = 0.005
 
 
-        label = [np.argmax(one_hot) for one_hot in labels.A]
-        n_nodes, feat_dim = features.shape
-        # Store original adjacency matrix (without diagonal entries) for later
-        adj_orig = adj
-        adj_orig = adj_orig - sp.dia_matrix((adj_orig.diagonal()[np.newaxis, :], [0]), shape=adj_orig.shape)
-        adj_orig.eliminate_zeros() # diagnal zeronize
-        adj_train, train_edges, val_edges, val_edges_false, test_edges, test_edges_false = mask_test_edges(adj)
-        adj = adj_train
+
+    label = [np.argmax(one_hot) for one_hot in labels.A]
+    n_nodes, feat_dim = features.shape
+    # Store original adjacency matrix (without diagonal entries) for later
+    adj_orig = adj
+    adj_orig = adj_orig - sp.dia_matrix((adj_orig.diagonal()[np.newaxis, :], [0]), shape=adj_orig.shape)
+    adj_orig.eliminate_zeros() # diagnal zeronize
+    adj_train, train_edges, val_edges, val_edges_false, test_edges, test_edges_false = mask_test_edges(adj)
+    adj = adj_train
 
 
-        path = './model/{}_filter_{}_{}.pth'.format(dataset,cfs[dataset],pws[dataset])
-        if os.path.exists(path):
-            device = torch.device('cuda:0')
-            afilter = torch.load(path,map_location=device)
-            print('Filter loaded!! %s' %  args.dataset)
-        else:
-            afilter = GraphConstructsByKmean(features, label, n_cluster,cfs[dataset],pws[dataset])
-            torch.save(afilter, path)
-            print('Filter saved!! %s' %  args.dataset)
-        adj_norm, adj_norm_m = preprocess_graph(adj,label,afilter)
-        print(adj_norm[0])
-        adj_norm = adj_norm.to_dense()
-        adj_norm_m = adj_norm_m.to_dense()
-        print('ADJ is masked by top ============================= %f' % args.k)
-        adj_label = adj_train + sp.eye(adj_train.shape[0])
-        adj_label = torch.FloatTensor(adj_label.toarray())
-        n_nodes = adj.shape[0]
-        adj_sum = adj.sum()
-        adj_sum_m = adj_norm_m.sum()
+    path = './model/{}_filter_{}_{}.pth'.format(dataset,args.cf,args.pw)
+    if os.path.exists(path):
+        device = torch.device('cuda:0')
+        afilter = torch.load(path,map_location=device)
+    else:
+        afilter = GraphConstructsByKmean(features, label, n_cluster,args.cf,args.pw)
+        torch.save(afilter, path)
+    adj_norm, adj_norm_m = preprocess_graph(adj,label,afilter)
+    print(adj_norm[0])
+    adj_norm = adj_norm.to_dense()
+    adj_norm_m = adj_norm_m.to_dense()
+    print('ADJ is masked by top ============================= %f' % args.k)
+    adj_label = adj_train + sp.eye(adj_train.shape[0])
+    adj_label = torch.FloatTensor(adj_label.toarray())
+    n_nodes = adj.shape[0]
+    adj_sum = adj.sum()
+    adj_sum_m = adj_norm_m.sum()
 
 
 
 
     dropout = args.dropout
-    if dataset in {'citeseer','wiki','amap','uat'}:
-        if dataset in {'citeseer'}:
-            n_cluster = 6
-            lr = 0.001
-
-        elif dataset == 'wiki':
-            n_cluster = 17
-            lr = 0.0005
-            dropout=0.3
-
-
-        elif dataset == 'amap':
-            n_cluster = 8
-            lr = 0.0001
-
-
-        if dataset in {'uat'}:
-            n_cluster = 4
-            lr = 0.001
-            dropout = 0.
-
-        features, labels = load_data_(dataset)
-
-
-        path = './model/{}_filter_{}_{}.pth'.format(dataset,str(cfs[dataset]),str(pws[dataset]))
-
-        if os.path.exists(path):
-            device = torch.device('cuda:0')
-            afilter = torch.load(path,map_location=device)
-            print('Filter loaded!! %s' %  dataset)
-        else:
-            afilter = GraphConstructsByKmean(features, labels, n_cluster,cfs[dataset],pws[dataset])
-            torch.save(afilter, path)
-            print('Filter saved!! %s' %  dataset)
-
-        adj, raw_adj, adjm = load_graph(dataset,None,afilter)
-        print("Using {} dataset".format(args.dataset))
-        label = labels
-        n_nodes, feat_dim = features.shape
-        adj_norm = adj
-        if type(adj_norm) == np.ndarray:
-            adj_norm = torch.tensor(adj_norm, dtype=torch.float32)
-        else:
-            adj_norm = adj_norm.to_dense()
-        adj_norm_m_np = adjm
-
-        if args.thr > 0:
-            print("Using the thresh===============>{}".format(args.thr))
-            adj_norm_m = torch.tensor(adj_norm_m_np, dtype=torch.float32).cuda()
-            adj_sum_m = adj_norm_m.sum()
-            print('The adj_sum_m is %f' % adj_sum_m)
-        else:
-            adj_norm_m = adj_norm
-
-        adj_sum = adj_norm.sum()
-        n_nodes = adj_norm.shape[0]
-        adj_sum_m = adj_norm_m.sum()
-        print('adj_sum_m is %f' % adj_sum_m)
 
     pos_weight = torch.tensor(float(n_nodes * n_nodes - adj_sum) / adj_sum)
     norm = adj_norm.shape[0] * adj_norm.shape[0] / float((adj_norm.shape[0] * adj_norm.shape[0] - adj_norm.sum()) * 2)
@@ -278,15 +215,8 @@ def gae_for(args):
     print('============================================================={}'.format(m))
     for i in range(experiment_iter):
         print('This is epoch %d\\%d on dataset %s' % (i + 1, experiment_iter,dataset))
-        if dataset in {'citeseer','cora'}:
-            lamd = 0.01
-        else:
-            lamd = 10
-
-
-        print('Now the Lamda is %f' % lamd)
         topN_similarity = None
-        if dataset in {'uat','texas','wisc','cornell'}:  # acm
+        if dataset in {'uat'}:
             gcn_model = GCNModelAE(features.shape[0], feat_dim, args.hidden1, args.hidden2, dropout,
                                    n_cluster, First_act=torch.tanh)
         else:
@@ -305,15 +235,15 @@ def gae_for(args):
 
         optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=1e-05)
         dsc = DSC(features.shape[0]).cuda()
-        dsc_optim = optim.Adam(dsc.parameters(), lr=dsc_lr[dataset], weight_decay=1e-05)
+        dsc_optim = optim.Adam(dsc.parameters(), lr=dsc_lr, weight_decay=1e-05)
         acc, nmi, ari, f1, epoch = clusteringm(dataset=dataset, models=[model,dsc], optimizers=[optimizer,dsc_optim],
                                         n_nodes=n_nodes, norm=[norm,norm_m], pos_weight=[pos_weight,pos_weight_m],
                                         adj_orig=adj, features=features, adj_norm=[adj_norm,adj_norm_m], label=label,
-                                        n_cluster=n_cluster, similarity=topN_similarity,l=lamd, filter = afilter)
+                                        n_cluster=n_cluster, similarity=topN_similarity,l=args.lmd, filter = afilter)
         print('acc: %f', acc)
-        print('nmi: %f', acc)
-        print('ari: %f', acc)
-        print('f1: %f', acc)
+        print('nmi: %f', nmi)
+        print('ari: %f', ari)
+        print('f1: %f', f1)
 
 
 def target_distribution(q):
@@ -331,33 +261,15 @@ def clusteringm(dataset,models,optimizers,n_nodes,norm,pos_weight,adj_orig,featu
     dsc = models[1]
     optimizer = optimizers[0]
     dsc_optim = optimizers[1]
-    parameters = setdiv(dataset)
-    ro = parameters['ro']
-    subdim = parameters['subdim']
-    ratio = parameters['ratio']
-    self_epochs = parameters['epochs']
-    w1 = parameters['b']
-    w2 = parameters['a']
-    div = parameters['d']
-    gamma = parameters['gamma']
-
-    if dataset == 'cora':
-        gcn_epoch = 21
-
-    if dataset == 'citeseer':
-        gcn_epoch = 221
-
-    if dataset == 'reut':
-        gcn_epoch = 101
-
-    if dataset == 'wiki':
-        gcn_epoch = 31
-
-    if dataset == 'amap':
-        gcn_epoch = 151
-
-    if dataset == 'uat':
-        gcn_epoch = 191
+    ro = args.ro
+    subdim = args.subdim
+    ratio = args.ratio
+    self_epochs = args.dsc_epoch
+    w1 = args.beta
+    w2 = args.alpha
+    div = args.d
+    gamma = args.gm
+    gcn_epoch = args.epochs
 
 
 

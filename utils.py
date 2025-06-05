@@ -630,8 +630,7 @@ def clusteringl(feature, true_labels, cluster_num):
 
 
 from kmeans_gpu import *
-def GraphConstructsByKmean(z, labels, n_cluster,cf=0.3, pw=0.1):
-    print('Filter begins: confidence filter is %f and power is %f!!!'  %  (cf,pw))
+def GraphConstructsByKmean(z, labels, n_cluster,cf=0.3, pw=0.):
     power = pw
     predict,dis = clusteringl(z,labels,n_cluster)
     high_confidence = torch.min(dis, dim=1).values
@@ -660,66 +659,6 @@ def GraphConstructsByKmean(z, labels, n_cluster,cf=0.3, pw=0.1):
     filter=cgraph
     return filter
 
-
-def setdiv(dataset):
-    paras = {}
-    if dataset == 'uat':
-        paras['subdim'] = 30
-        paras['ratio'] = 0.5
-        paras['ro'] = 4
-        paras['epochs'] = 101
-        paras['a'] = 1
-        paras['b'] = 0.1
-        paras['gamma'] = 1
-        paras['update_interval'] = 100
-        paras['d'] = 10
-
-    if dataset == 'cora':
-        paras['subdim'] = 20
-        paras['ratio'] = 0.1
-        paras['ro'] = 4
-        paras['epochs'] = 251
-        paras['a'] = 1
-        paras['b'] = 0.1
-        paras['gamma'] = 1
-        paras['update_interval'] = 100
-        paras['d'] = 10
-
-
-    elif dataset == 'citeseer':
-        paras['subdim'] = 20
-        paras['ratio'] = 1
-        paras['ro'] = 8
-        paras['epochs'] = 11
-        paras['a'] = 1
-        paras['b'] = 0.5
-        paras['gamma'] = 10
-        paras['update_interval'] = 150
-        paras['d'] =  10
-
-
-    elif dataset == 'wiki':
-        paras['subdim'] = 20
-        paras['ratio'] = 0.5
-        paras['ro'] = 4
-        paras['epochs'] = 50
-        paras['a'] = 1
-        paras['b'] = 10
-        paras['gamma'] = 1
-        paras['update_interval'] = 80
-        paras['d'] =  10
-
-    elif dataset == 'amap':
-        paras['subdim'] = 10
-        paras['ratio'] = 0.5
-        paras['ro'] = 4
-        paras['epochs'] = 41
-        paras['a'] = 1
-        paras['b'] = 0.1
-        paras['gamma'] = 0.1
-        paras['update_interval'] = 80
-        paras['d'] =  10
-    return paras
 
 def MatrixTopK(matrix,k):
     tmp = np.sort(matrix,axis=1)[:,-k]

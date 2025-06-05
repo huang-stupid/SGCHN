@@ -6,7 +6,5 @@
 
 - ### How to run
   ```bash
-  ./train.sh
-  or
   python train.py --dataset cora
   ```
