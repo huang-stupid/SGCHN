@@ -33,7 +33,7 @@ import sklearn.metrics.pairwise as pair
 parser = argparse.ArgumentParser()
 parser.add_argument('--model', type=str, default='gcn_vae', help="models used")
 parser.add_argument('--seed', type=int, default=70, help='Random seed.')
-parser.add_argument('--epochs', type=int, default=21, help='Number of epochs to train.')
+parser.add_argument('--epochs', type=int, default=100, help='Number of epochs to train.')
 parser.add_argument('--dsc_epoch', type=int, default=251, help='Number of epochs to train.')
 parser.add_argument('--hidden1', type=int, default=256, help='Number of units in hidden layer 1.')#512
 parser.add_argument('--hidden2', type=int, default=16, help='Number of units in hidden layer 2.')#32
