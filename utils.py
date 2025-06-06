@@ -631,6 +631,7 @@ def clusteringl(feature, true_labels, cluster_num):
 
 from kmeans_gpu import *
 def GraphConstructsByKmean(z, labels, n_cluster,cf=0.3, pw=0.):
+    print('Now building High-Confidence Neiborhood Filter....')
     power = pw
     predict,dis = clusteringl(z,labels,n_cluster)
     high_confidence = torch.min(dis, dim=1).values

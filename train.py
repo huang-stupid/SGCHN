@@ -1,5 +1,6 @@
 from __future__ import division
 from __future__ import print_function
+import tqdm
 
 from sklearn.preprocessing import normalize
 import os
@@ -47,16 +48,12 @@ parser.add_argument('--thr', type=float, default=0.1, help='Number of loop')
 parser.add_argument('--weight_s', type=float, default=0., help='Number of loop')
 parser.add_argument('--log', type=str, default='False', help='log or not')
 parser.add_argument('--n_cluster', type=int, default=7, help='log or not')
-parser.add_argument('--m', type=str, default='gae', help='log or not')
-parser.add_argument('--impute', type=str, default='False', help='log or not')
 parser.add_argument('--pre_model', type=str, default='False', help='log or not')
 parser.add_argument('--sample_rate', type=float, default=0.5, help='log or not')
 parser.add_argument('--gm', type=float, default=1.0, help='log or not')
-parser.add_argument('--d', type=int, default=10, help='log or not')
 parser.add_argument('--cf', type=float, default=0.9, help='log or not')
 parser.add_argument('--pw', type=float, default=0.4, help='log or not')
 parser.add_argument('--beta', type=float, default=0.1, help='log or not')
-parser.add_argument('--alpha', type=float, default=1.0, help='log or not')
 parser.add_argument('--ro', type=float, default=4.0, help='log or not')
 parser.add_argument('--subdim', type=int, default=20, help='log or not')
 parser.add_argument('--ratio', type=float, default=0.1, help='log or not')
@@ -65,7 +62,7 @@ parser.add_argument('--ratio', type=float, default=0.1, help='log or not')
 
 
 args = parser.parse_args()
-setup_seed(args.seed)
+# setup_seed(args.seed)
 
 experiment_iter = args.loop
 dsc_train = True
@@ -137,8 +134,6 @@ def eva(y_true, y_pred, epoch=0):
         acc, f1 = cluster_acc(y_true, y_pred)
         nmi = nmi_score(y_true, y_pred, average_method='arithmetic')
         ari = ari_score(y_true, y_pred)
-        print(epoch, ':acc {:.4f}'.format(acc), ', nmi {:.4f}'.format(nmi), ', ari {:.4f}'.format(ari),
-                ', f1 {:.4f}'.format(f1))
     except TypeError as e:
         print('Jump Over this error')
     return acc,nmi,ari,f1
@@ -150,24 +145,12 @@ import random
 
 
 def gae_for(args):
-    start = time.time()
+
     lr = args.lr
     dsc_lr=args.dsc_lr
     dataset = args.dataset
-    adj = None
-    adj_label = None
-    features = None
-    labels = None
-    n_nodes = None
-    feat_dim = None
-    adj_norm = None
-    dataset = args.dataset
     adj, features, labels= load_data(args.dataset)
     n_cluster = args.n_cluster
-
-
-
-
 
     label = [np.argmax(one_hot) for one_hot in labels.A]
     n_nodes, feat_dim = features.shape
@@ -178,28 +161,21 @@ def gae_for(args):
     adj_train, train_edges, val_edges, val_edges_false, test_edges, test_edges_false = mask_test_edges(adj)
     adj = adj_train
 
-
-    path = './model/{}_filter_{}_{}.pth'.format(dataset,args.cf,args.pw)
+    path = './{}_filter.pth'.format(dataset)
     if os.path.exists(path):
         device = torch.device('cuda:0')
-        afilter = torch.load(path,map_location=device)
+        afilter = torch.load(path, map_location=device)
+        print('Filter loaded!!')
     else:
-        afilter = GraphConstructsByKmean(features, label, n_cluster,args.cf,args.pw)
+        afilter = GraphConstructsByKmean(features, label, n_cluster, args.cf, args.pw)
         torch.save(afilter, path)
+        print('Filter saved!!')
     adj_norm, adj_norm_m = preprocess_graph(adj,label,afilter)
-    print(adj_norm[0])
     adj_norm = adj_norm.to_dense()
     adj_norm_m = adj_norm_m.to_dense()
-    print('ADJ is masked by top ============================= %f' % args.k)
-    adj_label = adj_train + sp.eye(adj_train.shape[0])
-    adj_label = torch.FloatTensor(adj_label.toarray())
     n_nodes = adj.shape[0]
     adj_sum = adj.sum()
     adj_sum_m = adj_norm_m.sum()
-
-
-
-
     dropout = args.dropout
 
     pos_weight = torch.tensor(float(n_nodes * n_nodes - adj_sum) / adj_sum)
@@ -208,13 +184,7 @@ def gae_for(args):
     pos_weight_m = torch.tensor(float(n_nodes * n_nodes - adj_sum_m) / adj_sum_m)
     norm_m = adj_norm_m.shape[0] * adj_norm_m.shape[0] / float((adj_norm_m.shape[0] * adj_norm_m.shape[0] - adj_norm_m.sum()) * 2)
 
-
-
-    m = args.m
-
-    print('============================================================={}'.format(m))
     for i in range(experiment_iter):
-        print('This is epoch %d\\%d on dataset %s' % (i + 1, experiment_iter,dataset))
         topN_similarity = None
         if dataset in {'uat'}:
             gcn_model = GCNModelAE(features.shape[0], feat_dim, args.hidden1, args.hidden2, dropout,
@@ -236,7 +206,7 @@ def gae_for(args):
         optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=1e-05)
         dsc = DSC(features.shape[0]).cuda()
         dsc_optim = optim.Adam(dsc.parameters(), lr=dsc_lr, weight_decay=1e-05)
-        acc, nmi, ari, f1, epoch = clusteringm(dataset=dataset, models=[model,dsc], optimizers=[optimizer,dsc_optim],
+        acc, nmi, ari, f1 = clusteringm(dataset=dataset, models=[model,dsc], optimizers=[optimizer,dsc_optim],
                                         n_nodes=n_nodes, norm=[norm,norm_m], pos_weight=[pos_weight,pos_weight_m],
                                         adj_orig=adj, features=features, adj_norm=[adj_norm,adj_norm_m], label=label,
                                         n_cluster=n_cluster, similarity=topN_similarity,l=args.lmd, filter = afilter)
@@ -244,7 +214,7 @@ def gae_for(args):
         print('nmi: %f', nmi)
         print('ari: %f', ari)
         print('f1: %f', f1)
-
+        return acc, nmi, ari, f1
 
 def target_distribution(q):
     q = q.detach()
@@ -265,9 +235,7 @@ def clusteringm(dataset,models,optimizers,n_nodes,norm,pos_weight,adj_orig,featu
     subdim = args.subdim
     ratio = args.ratio
     self_epochs = args.dsc_epoch
-    w1 = args.beta
-    w2 = args.alpha
-    div = args.d
+    w = args.beta
     gamma = args.gm
     gcn_epoch = args.epochs
 
@@ -296,8 +264,11 @@ def clusteringm(dataset,models,optimizers,n_nodes,norm,pos_weight,adj_orig,featu
         (adj_label.shape[0] * adj_label.shape[0] - s_sum) * 2)
 
     adjs = adj_label_m
-
-    for epoch in range(1, gcn_epoch):  # hidden1:512  hidden2:256 epoch:101
+    best_acc=0
+    best_nmi=0
+    best_ari=0
+    best_f1=0
+    for epoch in tqdm.tqdm(range(1,gcn_epoch)):
         s = s.cuda()
         adj_label = adj_label.cuda()
         adj_label_m = adj_label_m.cuda()
@@ -309,13 +280,12 @@ def clusteringm(dataset,models,optimizers,n_nodes,norm,pos_weight,adj_orig,featu
         loss.backward()
         optimizer.step()
 
-        if epoch % div == 0:
-            print('epoch is %d' % epoch)
+        if epoch % 10 == 0:
             feat_dsc = hidden_emb.detach()
             feats = [features, feat_dsc]
             for dsc_epoch in range(self_epochs):
                 emb_recons = dsc(feats)
-                dsc_loss = dsc.loss_dsc(feats, emb_recons,s,adj_label_m, gamma=gamma, weight=[w1, w2])
+                dsc_loss = dsc.loss_dsc(feats, emb_recons,s,adj_label_m, gamma=gamma, weight=w)
                 dsc_optim.zero_grad()
                 dsc_loss.backward()
                 dsc_optim.step()
@@ -324,12 +294,28 @@ def clusteringm(dataset,models,optimizers,n_nodes,norm,pos_weight,adj_orig,featu
             C = dsc.C.detach().to('cpu').numpy()
             y_pred,L = spectral_clustering(C, n_cluster, subdim, ratio, ro)
             acc, nmi, ari, f1  = eva(np.array(label), y_pred)
-    return acc,nmi,ari,f1,epoch
+            if best_acc < acc:
+                best_acc = acc
+                best_nmi = nmi
+                best_ari = ari
+                best_f1 = f1
+    return best_acc,best_nmi,best_ari,best_f1
 
 
 
 if __name__ == '__main__':
-    gae_for(args)
-
+    acc_list=[]
+    nmi_list=[]
+    ari_list=[]
+    f1_list=[]
+    args = parser.parse_args()
+    for seed in range(69,79):
+        setup_seed(seed)
+        acc,nmi,ari,f1 = gae_for(args)
+        acc_list.append(acc)
+        nmi_list.append(nmi)
+        ari_list.append(ari)
+        f1_list.append(f1)
+    print('Report Average Result: ACC %f, NMI %f, ARI %f, F1 %f' % (np.mean(acc_list),np.mean(nmi_list),np.mean(ari_list),np.mean(f1_list)))
 
 

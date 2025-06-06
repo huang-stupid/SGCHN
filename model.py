@@ -97,11 +97,11 @@ class DSC(nn.Module):
         gcn_encode_recons = [gcn_encode_recon1, gcn_encode_recon2]
         return gcn_encode_recons
 
-    def loss_dsc(self, zs, z_recons,s,adj,gamma=1,weight=[1,1]):
+    def loss_dsc(self, zs, z_recons,s,adj,gamma=1,weight=0.1):
         loss_coef = torch.norm(self.self_expression.Coefficient)
         loss_selfExp1 = torch.norm(zs[0] - z_recons[0], p='fro')
         loss_selfExp2 = torch.norm(zs[1] - z_recons[1], p='fro')
-        loss_selfExp = weight[0]*loss_selfExp1 + weight[1]*loss_selfExp2
+        loss_selfExp = weight*loss_selfExp1 + loss_selfExp2
         loss =  gamma*loss_coef + loss_selfExp
         return loss
 
